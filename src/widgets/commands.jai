@@ -142,6 +142,8 @@ commands := #run Command.[
     .{ .open_project_config,                                "Open Project Config",                0, .None },
     .{ .open_global_config,                                 "Open Global Config",                 0, .None },
     .{ .show_default_config,                                "Show Default Config (readonly)",     0, .None },
+    
+    .{ .choose_theme,                                       "Choose Theme",                       0, .None },
 
     .{ .create_new_file,                                    "Create New File",                    0, .None },
     .{ .create_new_file_on_the_side,                        "Create New File On The Side",        0, .Single },

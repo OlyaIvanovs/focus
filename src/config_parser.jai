@@ -47,7 +47,7 @@ parse_config :: (name: string, filename: string, file_data: string) -> Parsed_Co
     array_extend(*parsed_config.keymap_editors,          parsed_config.keymap_common);
     array_extend(*parsed_config.keymap_open_file_dialog, parsed_config.keymap_common);
     array_extend(*parsed_config.keymap_search_dialog,    parsed_config.keymap_common);
-
+    
     return parsed_config, true, "", warnings;
 }
 
@@ -299,16 +299,34 @@ parse_workspace_line :: (using parser: *Config_Parser, line: string) -> success:
 
 parse_style_line :: (using parser: *Config_Parser, line: string) -> success: bool, error_msg: string /* temp */ {
     if begins_with(line, "[") {
-        for STYLE_SUBSECTIONS {
-            if line == it { style_subsection = xx it_index; return true, ""; }
+        if line == {
+            case "[colors]";
+                style_subsection = .colors;
+                return true, "";
+            case "[user interface]";
+                error_msg := log_parser_error(handler, "Section 'user interface' is deprecated.\n Please remove the section's header.");
+                return true, error_msg;
         }
-        error_msg := log_parser_error(handler, "Unknown style subsection '%'.\nAvailable options are: %.", line, join(..STYLE_SUBSECTIONS, ", ", allocator = temp));
+        error_msg := log_parser_error(handler, "Unknown style subsection '%'.\n Available option is [colors].");
         return false, error_msg;
     }
-    if #complete style_subsection == {
-        case .user_interface;
-            setting, value := break_by_spaces(line);
-            setting = trim_right(setting, ":");
+    
+    if style_subsection == {
+        case .colors;
+            if parsed_config.theme return true, "";
+            
+            success, error_msg := parse_color_line(parser, line);
+            if !success  return false, error_msg;
+        
+        case .default;
+            ok, setting, value := split_from_left(line, ":");
+            error_msg := log_parser_error(handler, "Couldn't parse '%' - expected a style setting in the format 'name: value'", line);
+            if !ok {
+                return false, error_msg;
+            }
+            
+            value = trim(value);
+            setting = trim(setting);          
             if setting == {
                 case "font";
                     found, error := find_font_by_name(value);
@@ -317,7 +335,7 @@ parse_style_line :: (using parser: *Config_Parser, line: string) -> success: boo
                     } else {
                         error_msg := log_parser_error(handler, error);
                         return false, error_msg;
-                    }
+                    }   
                 case "font_size";
                     value_copy := value;
                     int_val, success := parse_int(*value_copy);
@@ -326,24 +344,56 @@ parse_style_line :: (using parser: *Config_Parser, line: string) -> success: boo
                     } else {
                         error_msg := log_parser_error(handler, "Couldn't parse '%' - expected a valid integer, got '%'", setting, value);
                         return false, error_msg;
+                    }     
+                case "theme";
+                    theme_name := to_lower_copy(value);  
+                    path := tprint("%/%.focus-theme", themes_dir, theme_name);
+                    found, _, extension := split_from_left(theme_name, ".");
+                    if found && extension == "focus-theme" {
+                        path = tprint("%/%", themes_dir, theme_name);
+                    }    
+                    error_msg := log_parser_error(handler, "Couldn't find file '%'", path);
+                    if !file_exists(path) return true, error_msg;
+                    
+                    theme_details, success := read_entire_file(path);
+                    if !success {
+                        error_msg := log_parser_error(handler, "Couldn't read file '%'", path);
+                        return false, error_msg;
                     }
+                    
+                    // Parse file with theme
+                    while true {
+                        line, found := consume_next_line(*theme_details);
+                        if !found break;
+                        if line == "" continue;
+                        success, error_msg := parse_color_line(parser, line);
+                        if !success  return false, error_msg;
+                    }
+                    
+                    parsed_config.theme = copy_string(theme_name);
+                case;
+                    error_msg := log_parser_error(handler, "Unknown style option '%'", setting);
+                    return false, error_msg;
             }
-        case .colors;
-            color_name, value := break_by_spaces(line);
-            color_name = trim_right(color_name, ":");
-            color_ptr := map_color_name_to_color_struct(*Config.{}, color_name);
-            if !color_ptr {
-                error_msg := log_parser_error(handler, "Unknown color '%'", color_name);
-                return false, error_msg;
-            }
-            color, success := hex_to_color(value);
-            if !success {
-                error_msg := log_parser_error(handler, "Couldn't parse '%'. Expected a color in the form RRGGBB or RRGGBBAA, got '%'", color_name, value);
-                return false, error_msg;
-            }
-            array_add(*parsed_config.colors, Parsed_Color.{ color_name, color });
     }
+    return true, "";
+}
 
+parse_color_line :: (using parser: *Config_Parser, line: string) -> bool, string {
+    color_name, value := break_by_spaces(line);
+    color_name = trim_right(color_name, ":");
+    color_ptr := map_color_name_to_color_struct(*config, color_name);
+    if !color_ptr {
+        error_msg := log_parser_error(handler, "Unknown color '%'", color_name);
+        return false, error_msg;
+    }
+    value, _ = break_by_spaces(value);
+    color, success := hex_to_color(value);
+    if !success {
+        error_msg := log_parser_error(handler, "Couldn't parse '%'. Expected a color in the form RRGGBB or RRGGBBAA, got '%'", color_name, value);
+        return false, error_msg;
+    }
+    array_add(*parsed_config.colors, Parsed_Color.{ color_name, color });
     return true, "";
 }
 
@@ -358,35 +408,6 @@ color_to_hex :: (using color: Color, exclude_hash := false) -> string /* temp  *
     if exclude_hash advance(*format, 1);
 
     return tprint(format, h(r_u8), h(g_u8), h(b_u8), h(a_u8));
-}
-
-hex_to_color :: (src_hex: string) -> Color, success: bool {
-    hex := src_hex;
-    if hex.count == 6 then hex = tprint("%FF", hex);
-    if hex.count != 8 return Color.{}, false;
-
-    r := slice(hex, 0, 2);
-    g := slice(hex, 2, 2);
-    b := slice(hex, 4, 2);
-    a := slice(hex, 6, 2);
-
-    to_float :: (byte_str: string) -> float {
-        hex_digit_to_int :: (char: u8) -> int {
-            char = to_upper(char);
-            if #char "0" <= char && char <= #char "9" return char - #char "0";
-            if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
-            return -1;
-        }
-
-        d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
-        if d1 < 0 || d0 < 0 return -1;
-
-        return (16 * d1 + d0) / 255;
-    }
-
-    c := Color.{ r = to_float(r), g = to_float(g), b = to_float(b), a = to_float(a) };
-
-    return c, c.r >= 0 && c.g >= 0 && c.b >= 0 && c.a >= 0;
 }
 
 parse_settings_line :: (using parser: *Config_Parser, line: string) -> success: bool, error_msg: string /* temp */ {
@@ -617,6 +638,7 @@ Parsed_Config :: struct {
     font:      string;
     font_size: int;
     colors:    [..] Parsed_Color;
+    theme:     string;
 
     platform: Platform_Config;
 };
@@ -624,6 +646,35 @@ Parsed_Config :: struct {
 Parsed_Color :: struct {
     color_name: string;
     color: Color;
+}
+
+hex_to_color :: (src_hex: string) -> Color, success: bool {
+    hex := src_hex;
+    if hex.count == 6 then hex = tprint("%FF", hex);
+    if hex.count != 8 return Color.{}, false;
+
+    r := slice(hex, 0, 2);
+    g := slice(hex, 2, 2);
+    b := slice(hex, 4, 2);
+    a := slice(hex, 6, 2);
+
+    to_float :: (byte_str: string) -> float {
+        hex_digit_to_int :: (char: u8) -> int {
+            char = to_upper(char);
+            if #char "0" <= char && char <= #char "9" return char - #char "0";
+            if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
+            return -1;
+        }
+
+        d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
+        if d1 < 0 || d0 < 0 return -1;
+
+        return (16 * d1 + d0) / 255;
+    }
+
+    c := Color.{ r = to_float(r), g = to_float(g), b = to_float(b), a = to_float(a) };
+
+    return c, c.r >= 0 && c.g >= 0 && c.b >= 0 && c.a >= 0;
 }
 
 #scope_file
@@ -664,16 +715,6 @@ Config_Parser :: struct {
         "[ignore file extensions]",
     ];
 
-    style_subsection: enum {
-        user_interface;
-        colors;
-    };
-    STYLE_SUBSECTIONS :: string.[
-        // Must match the order of the enum above
-        "[user interface]",
-        "[colors]",
-    ];
-
     keymap_subsection: enum {
         common;
         editors;
@@ -687,6 +728,11 @@ Config_Parser :: struct {
         "[open file dialog]",
         "[search dialog]",
     ];
+    
+    style_subsection: enum {
+        default;
+        colors;
+    } = .default;
 
     platform_subsection: PLATFORM_SUBSECTION_ENUM;
 }

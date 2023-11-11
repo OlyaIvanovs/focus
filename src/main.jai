@@ -24,12 +24,16 @@ main :: () {
 
     temp_dir     = sprint("%/temp",     data_dir);
     projects_dir = sprint("%/projects", config_dir);
+    themes_dir   = sprint("%/themes", config_dir);
 
     projects_dir_existed := file_exists(projects_dir);
+    themes_dir_existed   := file_exists(themes_dir);
 
     if !make_directory_if_it_does_not_exist(projects_dir) then panic_messagebox("Couldn't create folder %. Is the directory writable?", projects_dir);
     if !make_directory_if_it_does_not_exist(temp_dir)     then panic_messagebox("Couldn't create folder % for temporary files. Is the directory writable?", temp_dir);
+    if !make_directory_if_it_does_not_exist(themes_dir)   then panic_messagebox("Couldn't create folder % for themes. Is the directory writable?", temp_dir);
     if !projects_dir_existed then write_entire_file(tprint("%/Example Project.focus-config", projects_dir), EXAMPLE_PROJECT_FILE_DATA);
+    if !themes_dir_existed then fill_in_default_themes();
 
     init_file_watcher();
     load_global_config(fallback_to_default_on_failure = true);
@@ -244,6 +248,7 @@ main :: () {
                     case .delete_file_dialog;       handled = delete_file_dialog_handle_event(event);
                     case .go_to_line_dialog;        handled = go_to_line_dialog_handle_event(event);
                     case .open_project_dialog;      handled = open_project_dialog_handle_event(event);
+                    case .choose_theme_dialog;      handled = choose_theme_dialog_handle_event(event);
                     case .unsaved_buffers_dialog;   handled = unsaved_buffers_dialog_handle_event(event);
                     case .commands_dialog;          handled = commands_dialog_handle_event(event);
                 }
@@ -253,6 +258,9 @@ main :: () {
         }
 
         end_key_sequence_handling();
+        
+        // If temporary theme is set and widget is not choose_theme, revert theme to previous
+        if active_global_widget != .choose_theme_dialog then revert_theme_to_previous();
 
         if should_quit && unsaved_buffers_exist() && !force_quit {
             show_unsaved_buffers_dialog();
@@ -306,6 +314,8 @@ handle_common_editor_action :: (action: Action_Editors, placement: Editor_Placem
         case .open_global_config;                               editors_open_global_config(placement);              return true;
         case .open_project_config;                              editors_open_project_config(placement);             return true;
         case .show_default_config;                              editors_show_default_config(placement);             return true;
+        
+        case .choose_theme;                                     show_choose_theme_dialog();                         return true;
 
         case .go_to_line;                                       show_go_to_line_dialog();                           return true;
         case .create_new_file;                                  editors_create_new_file(placement);                 return true;
@@ -555,6 +565,13 @@ current_time_consensus_backwards_compatible :: () -> Apollo_Time {
     }
 }
 
+fill_in_default_themes :: () {
+    for theme : BUILTIN_THEMES {
+        write_entire_file(tprint("%/%.focus-theme", themes_dir, theme.name), theme.contents);
+    }
+}
+
+
 calculate_hash: (bytes: [] u8) -> u64 = calculate_meow_hash;
 
 // Important directories
@@ -562,6 +579,7 @@ config_dir:   string;
 data_dir:     string;
 temp_dir:     string;
 projects_dir: string;
+themes_dir:   string;
 
 window: Window_Type;
 window_generic_title: string = ---;
@@ -694,6 +712,7 @@ active_global_widget: enum {
     go_to_line_dialog;
     commands_dialog;
     open_project_dialog;
+    choose_theme_dialog;
     unsaved_buffers_dialog;
 } = .editors;
 
@@ -702,6 +721,33 @@ Project_Dir :: struct {
     path_prefix_len: s64;  // in this case the length of "C:/projects/"
     name: string;          // a view into path
 }
+
+Builtin_Theme :: struct {
+    name: string;
+    contents: string;
+}
+
+BUILTIN_THEMES :: #run -> [] Builtin_Theme {
+    themes: [..] Builtin_Theme;
+
+    visitor :: (info: *File_Visit_Info, themes: *[..] Builtin_Theme) {
+        if !ends_with_nocase(info.full_name, ".focus-theme") return;
+        full_path := copy_string(info.full_name);
+
+        path, basename, extension, name := path_decomp(full_path);
+        file_contents, ok := read_entire_file(full_path);
+        if !ok return;
+
+        array_add(themes, Builtin_Theme.{
+            name = basename,
+            contents = file_contents,
+        });
+    }
+    visit_files("themes", recursive = true, *themes, visitor, visit_files = true, visit_directories = false);
+
+    return themes;
+}
+
 
 // A string which contains the path to a file which was just drag-and-dropped into the editor (for the draw code to use)
 just_dropped_file := "";
@@ -740,6 +786,7 @@ dont_ignore_next_window_resize := false;
 #load "widgets/unsaved_buffers.jai";
 #load "widgets/commands.jai";
 #load "widgets/open_project.jai";
+#load "widgets/choose_theme.jai";
 
 #load "langs/jai.jai";
 #load "langs/c.jai";

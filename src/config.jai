@@ -327,6 +327,7 @@ Config :: struct {
     keymap:    Keymap;
     settings:  Settings;
     style:     Style;
+    theme:     string;
     colors:    Color_Values;
     platform:  Platform_Config;
 }

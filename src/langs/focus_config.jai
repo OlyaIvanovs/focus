@@ -3,6 +3,8 @@ highlight_focus_config_syntax :: (using buffer: *Buffer) {
     tokenizer.buf   = to_string(bytes);
     tokenizer.max_t = bytes.data + bytes.count;
     tokenizer.t     = bytes.data;
+    
+    theme_is_set = false;
 
     while true {
         token := get_next_token(*tokenizer);
@@ -36,8 +38,8 @@ get_next_token :: (using tokenizer: *Tokenizer) -> Token {
                 case .keymap;       parse_keymap_line(tokenizer, *token);
                 case .workspace;    parse_line(tokenizer, *token);
                 case .settings;     parse_line(tokenizer, *token);
-                // case .ui;           parse_ui_line(tokenizer, *token);
-                // case .colors;       parse_color_line(tokenizer, *token);
+                case .style;        parse_style_line(tokenizer, *token);
+                case .colors;       parse_color_line(tokenizer, *token);
                 case;
                     parse_line(tokenizer, *token);
             }
@@ -75,8 +77,10 @@ try_parsing_header :: (using tokenizer: *Tokenizer, token: *Token) {
         case "[open file dialog]";          token.type = .header;
         case "[search dialog]";             token.type = .header;
 
-        case "[user interface]";            token.type = .header; section = .ui;
-        case "[colors]";                    token.type = .header; section = .colors;
+        case "[colors]";    
+            token.type = .header; 
+            section = .colors;
+            if theme_is_set token.type = .comment;
 
         case; token.type = .default; t = old_t + 1;
     }
@@ -93,6 +97,40 @@ parse_line :: (using tokenizer: *Tokenizer, token: *Token) {
     token.type = .default;
 
     t += 1;
+    eat_until_newline_or_comment(tokenizer);
+}
+
+parse_color_line :: (using tokenizer: *Tokenizer, token: *Token) {
+    token.type = .default;
+    
+    if theme_is_set token.type = .comment;
+    
+    t += 1;
+    eat_until_newline_or_comment(tokenizer);
+}
+
+parse_style_line :: (using tokenizer: *Tokenizer, token: *Token) {
+    token.type = .default;
+       
+    if !is_alnum(<<t) {
+        t += 1;
+        return;
+    }
+    
+    old_t := t;
+    t += 1;
+    while t < max_t && is_alnum(<<t) {
+        t += 1;
+    }
+    
+    str: string = ---;
+    str.data  = old_t;
+    str.count = t - old_t;
+    
+    if to_lower_copy(str) == "theme" {
+        theme_is_set = true;
+    }
+
     eat_until_newline_or_comment(tokenizer);
 }
 
@@ -147,6 +185,8 @@ eat_white_space :: (using tokenizer: *Tokenizer) {
         t += 1;
     }
 }
+
+theme_is_set: bool;
 
 Tokenizer :: struct {
     buf: string;

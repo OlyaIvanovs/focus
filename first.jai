@@ -97,7 +97,7 @@ build :: () {
         }
 
         manifest_options: Manifest_Options;
-        success = add_manifest_to_executable(exe_path, manifest_options);
+        success = add_manifest_to_executable(get_absolute_path(exe_path), manifest_options);
         if !success {
             log_error("ERROR: Couldn't add manifest to executable '%'\n", exe_path);
         }

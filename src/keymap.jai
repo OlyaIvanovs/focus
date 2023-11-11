@@ -276,6 +276,8 @@ ACTIONS_COMMON :: string.[
     "show_default_config",
     // "open_error_log",  // todo
     "toggle_fullscreen",
+    
+    "choose_theme",
 
     "show_commands",
     "search_in_buffer",
