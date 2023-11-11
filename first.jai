@@ -44,7 +44,7 @@ build :: () {
             compiler_report(tprint("Command-line argument #%, '%', is invalid. Valid options are: 'debug', 'release'.\n", it_index+1, arg));
         }
     }
-    
+
     options.output_path = build_dir;
     make_directory_if_it_does_not_exist(build_dir);
 
